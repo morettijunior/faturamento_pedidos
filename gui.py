@@ -1,6 +1,24 @@
+import os
+import sys
 import time
 import tkinter as tk
 from tkinter import messagebox
+
+# Pega o caminho exato da pasta raiz do projeto e adiciona os módulos ao path
+base_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(base_dir)
+sys.path.append(os.path.join(base_dir, "modulos"))
+
+# Importações de todos os módulos reais (Geração, Envio e Financeiro)
+from modulos.bd import consultar_dados_pedido
+from modulos.nfe import emitir_nfe
+from modulos.envio_nfe import enviar_nfe
+from modulos.nfs import emitir_nfs
+from modulos.envio_nfs import enviar_nfs
+from modulos.boleto_sem_nota import emitir_boleto_sem_nota
+from modulos.boleto_com_nota_unica import emitir_boletos_com_nota_unica
+from modulos.boleto_individual_com_notas import emitir_boletos_individuais_com_notas
+from modulos.boleto_unificado_com_notas import emitir_boleto_unificado_com_notas
 
 
 class AppAutomacaoERP:
@@ -12,10 +30,16 @@ class AppAutomacaoERP:
     self.root.resizable(False, False)
 
     self.linhas_gui = []
+    self.historico_logs = []
     self.criar_interface()
 
+  def log(self, mensagem):
+    timestamp = time.strftime("%H:%M:%S")
+    texto_formatado = f"[{timestamp}] {mensagem}"
+    self.historico_logs.append(texto_formatado)
+    print(texto_formatado)
+
   def criar_interface(self):
-    # Cabeçalho da Tabela Visual
     tk.Label(
         self.root, text="Nº do Pedido", font=("Arial", 10, "bold")
     ).place(x=30, y=15)
@@ -23,20 +47,16 @@ class AppAutomacaoERP:
         self.root, text="Opções de Execução por Pedido", font=("Arial", 10, "bold")
     ).place(x=180, y=15)
 
-    # Criando 20 linhas dinâmicas na tela
     y_inicial = 45
     for i in range(20):
-      # Campo de texto para o número do pedido
       txt_pedido = tk.Entry(self.root, width=12, font=("Arial", 10))
       txt_pedido.place(x=30, y=y_inicial)
 
-      # Variáveis de controle das Checkboxes
       var_nfe = tk.BooleanVar()
       var_nfs = tk.BooleanVar()
       var_boleto_cada = tk.BooleanVar()
       var_unificado = tk.BooleanVar()
 
-      # Checkboxes com os novos textos
       chk_nfe = tk.Checkbutton(self.root, text="NFE", variable=var_nfe)
       chk_nfe.place(x=140, y=y_inicial - 2)
 
@@ -53,7 +73,6 @@ class AppAutomacaoERP:
       )
       chk_unificado.place(x=435, y=y_inicial - 2)
 
-      # Armazena a referência para leitura posterior (com as novas chaves)
       self.linhas_gui.append({
           "pedido": txt_pedido,
           "nfe": var_nfe,
@@ -62,10 +81,8 @@ class AppAutomacaoERP:
           "unificado": var_unificado,
       })
 
-      # Incrementa o Y para a próxima linha
       y_inicial += 26
 
-    # Botão de Execução Geral
     btn_executar = tk.Button(
         self.root,
         text="EXECUTAR LOTE NO ERP",
@@ -74,100 +91,198 @@ class AppAutomacaoERP:
         font=("Arial", 11, "bold"),
         command=self.iniciar_processamento,
     )
-    btn_executar.place(x=30, y=575, width=755, height=40)
+    btn_executar.place(x=30, y=575, width=660, height=40)
+
+    btn_log = tk.Button(
+        self.root,
+        text="LOG",
+        bg="#6c757d",
+        fg="white",
+        font=("Arial", 10, "bold"),
+        command=self.exibir_janela_log,
+    )
+    btn_log.place(x=705, y=575, width=80, height=40)
+
+  def exibir_janela_log(self):
+    top = tk.Toplevel(self.root)
+    top.title("Histórico de Logs - Bastidores do Robô")
+    top.geometry("750x500")
+
+    txt_log = tk.Text(
+        top, wrap=tk.WORD, font=("Courier", 9), bg="#1e1e1e", fg="#00ff00"
+    )
+    txt_log.pack(expand=True, fill="both", padx=10, pady=10)
+
+    if not self.historico_logs:
+      txt_log.insert(tk.END, "Nenhum log registrado ainda.")
+    else:
+      for log_msg in self.historico_logs:
+        txt_log.insert(tk.END, log_msg + "\n")
+
+    txt_log.config(state=tk.DISABLED)
 
   def iniciar_processamento(self):
     fila_tarefas = []
+    self.log("=== INÍCIO DA VARREDURA DA INTERFACE ===")
 
-    # Coleta apenas as linhas preenchidas pelo usuário
     for idx, linha in enumerate(self.linhas_gui):
       num_pedido = linha["pedido"].get().strip()
       if num_pedido:
+        nfe = linha["nfe"].get()
+        nfs = linha["nfs"].get()
+        boleto_cada = linha["boleto_cada"].get()
+        unificado = linha["unificado"].get()
+
+        if not nfe and not nfs and not boleto_cada and not unificado:
+          erro_msg = (
+              f"Validação Falhou na Linha {idx + 1} (Pedido {num_pedido}):"
+              " Nenhuma opção selecionada."
+          )
+          self.log(f"[ERRO] {erro_msg}")
+          messagebox.showerror("Erro de Validação", erro_msg)
+          return
+
+        if boleto_cada and unificado:
+          erro_msg = (
+              f"Validação Falhou na Linha {idx + 1} (Pedido {num_pedido}):"
+              " Conflito de boletos marcados simultaneamente."
+          )
+          self.log(f"[ERRO] {erro_msg}")
+          messagebox.showerror("Erro de Validação", erro_msg)
+          return
+
+        self.log(
+            f"Pedido {num_pedido} (Linha {idx + 1}) adicionado à fila | NFE:"
+            f" {nfe} | NFS: {nfs} | Boleto Cada: {boleto_cada} | Unificado:"
+            f" {unificado}"
+        )
         fila_tarefas.append({
             "linha": idx + 1,
             "pedido": num_pedido,
-            "nfe": linha["nfe"].get(),
-            "nfs": linha["nfs"].get(),
-            "boleto_cada": linha["boleto_cada"].get(),
-            "unificado": linha["unificado"].get(),
+            "nfe": nfe,
+            "nfs": nfs,
+            "boleto_cada": boleto_cada,
+            "unificado": unificado,
         })
 
     if not fila_tarefas:
+      self.log("[AVISO] Nenhum pedido preenchido na interface.")
       messagebox.showwarning(
           "Aviso", "Preencha pelo menos um pedido na interface!"
       )
       return
 
-    # Inicia a esteira de automação
+    self.log(f"Total de pedidos na fila de execução: {len(fila_tarefas)}")
     self.executar_automacao_erp(fila_tarefas)
 
   def executar_automacao_erp(self, fila):
     relatorio_sucesso = []
+    self.log("=== INICIANDO ESTEIRA DE AUTOMAÇÃO REAL NO ERP ===")
 
     try:
       for item in fila:
         pedido = item["pedido"]
-        print(f"Processando Pedido: {pedido}...")
-
-        # ==========================================
-        # AQUI ENTRARÃO OS COMANDOS DO PYAUTOGUI / PYWINAUTO
-        # ==========================================
-        time.sleep(1)  # Simula tempo de digitação e navegação no ERP
+        self.log(f"--- Processando Pedido: {pedido} ---")
 
         num_nfe_gerada = None
         num_nfs_gerada = None
+        boletos_gerados = []
 
-        # 1. PROCESSAMENTO DE NOTAS (NFE / NFS)
+        # =========================================================================
+        # ETAPA 1: GERAÇÃO E ENVIO DE NOTAS FISCAIS (1º NFE, 2º NFS)
+        # =========================================================================
+        if item["nfe"]:
+          self.log(f"[{pedido}] [1/4] Gerando NFE (nfe.py)...")
+          emitir_nfe(pedido)
+          time.sleep(1.0)
+
+          self.log(f"[{pedido}] [2/4] Enviando NFE para a SEFAZ (envio_nfe.py)...")
+          enviar_nfe(pedido)
+          num_nfe_gerada = "Enviada"
+          time.sleep(1.0)
+
+        if item["nfs"]:
+          self.log(f"[{pedido}] [3/4] Gerando NFS (nfs.py)...")
+          emitir_nfs(pedido)
+          time.sleep(1.0)
+
+          self.log(f"[{pedido}] [4/4] Enviando NFS para a Prefeitura (envio_nfs.py)...")
+          enviar_nfs(pedido)
+          num_nfs_gerada = "Enviada"
+          time.sleep(1.0)
+
         if item["nfe"] or item["nfs"]:
-          # SIMULAÇÃO DE ERRO CRÍTICO (Ex: Se digitar 999, simula queda da SEFAZ)
-          if pedido == "999":
+          self.log(f"[{pedido}] [ETAPA 1 CONCLUÍDA] Notas geradas e transmitidas.")
+          time.sleep(1.5)  # Transição segura para o financeiro
+
+        # =========================================================================
+        # ETAPA 2: EMISSÃO DE BOLETOS (SE MARCADA)
+        # =========================================================================
+        if item["boleto_cada"] or item["unificado"]:
+          self.log(f"[{pedido}] [ETAPA 2] Consultando dados no banco (bd.py) para o financeiro...")
+          dados_bd = consultar_dados_pedido(pedido)
+
+          if not dados_bd:
             raise Exception(
-                f"SEFAZ FORA DO AR / REJEIÇÃO no Pedido {pedido}. Conexão"
-                " perdida com o webservice."
+                f"Pedido {pedido} não foi encontrado no Banco de Dados (bd.py) para emissão de boleto."
             )
 
-          # Simula notas geradas com sucesso
-          if item["nfe"]:
-            num_nfe_gerada = "84920"
-          if item["nfs"]:
-            num_nfs_gerada = "3102"
+          nfe_bd = dados_bd.get("NFE")
+          rps_bd = dados_bd.get("RPS")
+          valor_total = dados_bd.get("VALOR_TOTAL", "R$ 0,00")
+          vencimentos = dados_bd.get("VENCIMENTOS", [])
 
-        # 2. PROCESSAMENTO DE BOLETOS (Só executa se passou pelas notas com sucesso)
-        boletos_gerados = []
-        if item["boleto_cada"] or item["unificado"]:
-          time.sleep(1)  # Simula tempo de envio para API do banco
+          tipo_boleto = ""
 
-          tipo_gerado = (
-              "BOLETO UNIFICADO" if item["unificado"] else "BOLETO P/ CADA NOTA"
-          )
+          if item["unificado"]:
+            self.log(f"[{pedido}] Acionando BOLETO UNIFICADO...")
+            emitir_boleto_unificado_com_notas(pedido)
+            tipo_boleto = "BOLETO UNIFICADO"
+          else:
+            self.log(f"[{pedido}] Analisando tipo de BOLETO P/ CADA NOTA...")
+            if nfe_bd and rps_bd:
+              self.log(f"[{pedido}] Pedido com múltiplas notas. Acionando individuais...")
+              emitir_boletos_individuais_com_notas(pedido)
+            elif nfe_bd or rps_bd:
+              self.log(f"[{pedido}] Pedido com nota única. Acionando nota única...")
+              emitir_boletos_com_nota_unica(pedido)
+            else:
+              self.log(f"[{pedido}] Pedido sem nota. Acionando boleto sem nota...")
+              emitir_boleto_sem_nota(pedido)
+            tipo_boleto = "BOLETO P/ CADA NOTA"
 
-          # Exemplo simulando que gerou boletos
+          if nfe_bd: num_nfe_gerada = str(nfe_bd)
+          if rps_bd: num_nfs_gerada = str(rps_bd)
+
+          venc_str = vencimentos[0] if vencimentos else "A definir"
           boletos_gerados.append({
-              "tipo": tipo_gerado,
-              "numero": "908123-1",
-              "vencimento": "20/10/2026",
-              "valor": "R$ 750,00",
+              "tipo": tipo_boleto,
+              "numero": f"{nfe_bd or 'N/A'}/{rps_bd or 'N/A'}",
+              "vencimento": venc_str,
+              "valor": valor_total,
           })
+          self.log(f"[{pedido}] [ETAPA 2 CONCLUÍDA] Boleto(s) emitido(s) com sucesso.")
 
-        # SUCESSO NESTE PEDIDO: Acumula no relatório parcial
+        # Consolida o sucesso do pedido
         relatorio_sucesso.append({
             "pedido": pedido,
             "nfe": num_nfe_gerada,
             "nfs": num_nfs_gerada,
             "boletos": boletos_gerados,
         })
+        self.log(f"[{pedido}] Ciclo do pedido 100% finalizado com êxito.")
 
-      # Se o loop terminar sem exceções, exibe o relatório 100% concluído
+      self.log("=== LOTE CONCLUÍDO COM SUCESSO 100% ===")
       self.exibir_relatorio(
           relatorio_sucesso, "RELATÓRIO FINAL - 100% CONCLUÍDO COM SUCESSO"
       )
 
     except Exception as e:
-      # PARADA TOTAL IMEDIATA + EXIBIÇÃO DO ERRO E DO RELATÓRIO PARCIAL
+      self.log(f"[FALHA CRÍTICA] O lote foi interrompido: {str(e)}")
       mensagem_falha = (
           f"O robô interrompeu a esteira devido a um erro:\n\n{str(e)}\n\n"
           "--- ATENÇÃO ---\nO lote parou. Veja abaixo o relatório dos pedidos"
-          " que foram processados com sucesso antes da falha:"
+          " processados com sucesso antes da falha:"
       )
       messagebox.showerror("ERRO CRÍTICO - LOTE INTERROMPIDO", mensagem_falha)
 
@@ -184,7 +299,7 @@ class AppAutomacaoERP:
   def exibir_relatorio(self, dados, titulo_janela):
     texto_relatorio = f"=== {titulo_janela} ===\n\n"
     for item in dados:
-      linha_resumo = f"PEDIDO {item['pedido']}"
+      linha_resumo = f"NÚMERO PEDIDO: {item['pedido']}"
       if item["nfe"]:
         linha_resumo += f" | NFE: {item['nfe']}"
       if item["nfs"]:
@@ -194,15 +309,17 @@ class AppAutomacaoERP:
       if item["boletos"]:
         for idx, bol in enumerate(item["boletos"], 1):
           texto_relatorio += (
-              f"   -> [{bol['tipo']}] Boleto {idx:02d} | Num: {bol['numero']}"
+              f"    -> [{bol['tipo']}] Boleto {idx:02d} | Num: {bol['numero']}"
               f" | Venc: {bol['vencimento']} | Val: {bol['valor']}\n"
           )
+      else:
+        texto_relatorio += "    -> Nenhum boleto emitido para este pedido.\n"
+
       texto_relatorio += "-" * 70 + "\n"
 
-    # Cria janela pop-up customizada para exibir o relatório formatado
     top = tk.Toplevel(self.root)
     top.title(titulo_janela)
-    top.geometry("700x450")
+    top.geometry("720x480")
 
     txt_box = tk.Text(top, wrap=tk.WORD, font=("Courier", 10))
     txt_box.pack(expand=True, fill="both", padx=10, pady=10)
