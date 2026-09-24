@@ -9,8 +9,8 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(base_dir)
 sys.path.append(os.path.join(base_dir, "modulos"))
 
-# Importações de todos os módulos reais (Geração, Envio e Financeiro)
-from modulos.bd import consultar_dados_pedido
+# Importações de todos os módulos reais (Geração, Envio, Financeiro e BD com pós-consulta)
+from modulos.bd import consultar_dados_pedido, consultar_numeros_boletos
 from modulos.nfe import emitir_nfe
 from modulos.envio_nfe import enviar_nfe
 from modulos.nfs import emitir_nfs
@@ -229,39 +229,78 @@ class AppAutomacaoERP:
 
           nfe_bd = dados_bd.get("NFE")
           rps_bd = dados_bd.get("RPS")
+          nfs_bd = dados_bd.get("NFS")
           valor_total = dados_bd.get("VALOR_TOTAL", "R$ 0,00")
           vencimentos = dados_bd.get("VENCIMENTOS", [])
 
           tipo_boleto = ""
+          tipo_rotina_bd = ""
 
           if item["unificado"]:
             self.log(f"[{pedido}] Acionando BOLETO UNIFICADO...")
             emitir_boleto_unificado_com_notas(pedido)
             tipo_boleto = "BOLETO UNIFICADO"
+            tipo_rotina_bd = "unificado"
           else:
             self.log(f"[{pedido}] Analisando tipo de BOLETO P/ CADA NOTA...")
             if nfe_bd and rps_bd:
               self.log(f"[{pedido}] Pedido com múltiplas notas. Acionando individuais...")
               emitir_boletos_individuais_com_notas(pedido)
+              tipo_rotina_bd = "individual"
             elif nfe_bd or rps_bd:
               self.log(f"[{pedido}] Pedido com nota única. Acionando nota única...")
               emitir_boletos_com_nota_unica(pedido)
+              tipo_rotina_bd = "nota_unica"
             else:
               self.log(f"[{pedido}] Pedido sem nota. Acionando boleto sem nota...")
               emitir_boleto_sem_nota(pedido)
+              tipo_rotina_bd = "sem_nota"
             tipo_boleto = "BOLETO P/ CADA NOTA"
 
           if nfe_bd: num_nfe_gerada = str(nfe_bd)
           if rps_bd: num_nfs_gerada = str(rps_bd)
 
-          venc_str = vencimentos[0] if vencimentos else "A definir"
+          # =====================================================================
+          # PÓS-CONSULTA: BUSCANDO O NÚMERO DO BOLETO (BOL_NUMERO) NA FLAN
+          # =====================================================================
+          self.log(f"[{pedido}] Consultando número(s) de boleto(s) na FLAN (BOL_NUMERO)...")
+          time.sleep(2.0)  # Pausa segura para consolidação no Firebird
+          
+          numeros_boletos = consultar_numeros_boletos(pedido, tipo_rotina=tipo_rotina_bd, nfe=nfe_bd, rps=rps_bd)
+          str_num_boleto = " / ".join(numeros_boletos) if numeros_boletos else "Pendente / Não Capturado"
+
+          # Montagem descritiva do documento de origem no relatório
+          if item["unificado"]:
+            partes_doc = []
+            if nfe_bd: partes_doc.append(f"NFE: {nfe_bd}")
+            if nfs_bd or rps_bd: partes_doc.append(f"NFS: {nfs_bd or rps_bd}")
+            doc_origem_str = " / ".join(partes_doc) if partes_doc else f"Pedido: {pedido}"
+          else:
+            if nfe_bd and not (nfs_bd or rps_bd):
+              doc_origem_str = f"NFE: {nfe_bd}"
+            elif (nfs_bd or rps_bd) and not nfe_bd:
+              doc_origem_str = f"NFS: {nfs_bd or rps_bd}"
+            elif nfe_bd and (nfs_bd or rps_bd):
+              doc_origem_str = f"NFE: {nfe_bd} / NFS: {nfs_bd or rps_bd}"
+            else:
+              doc_origem_str = f"Pedido: {pedido}"
+
+          num_doc_relatorio = f"{doc_origem_str} | Boleto Nº: {str_num_boleto}"
+
+          # Formatação amigável da data de DDMMYYYY para DD/MM/YYYY
+          venc_raw = vencimentos[0] if vencimentos else ""
+          if len(venc_raw) == 8 and venc_raw.isdigit():
+            venc_formatado = f"{venc_raw[0:2]}/{venc_raw[2:4]}/{venc_raw[4:8]}"
+          else:
+            venc_formatado = venc_raw or "A definir"
+
           boletos_gerados.append({
               "tipo": tipo_boleto,
-              "numero": f"{nfe_bd or 'N/A'}/{rps_bd or 'N/A'}",
-              "vencimento": venc_str,
+              "numero": num_doc_relatorio,
+              "vencimento": venc_formatado,
               "valor": valor_total,
           })
-          self.log(f"[{pedido}] [ETAPA 2 CONCLUÍDA] Boleto(s) emitido(s) com sucesso.")
+          self.log(f"[{pedido}] [ETAPA 2 CONCLUÍDA] Boleto(s) emitido(s) e mapeados com sucesso.")
 
         # Consolida o sucesso do pedido
         relatorio_sucesso.append({

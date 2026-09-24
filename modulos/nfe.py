@@ -16,7 +16,7 @@ def emitir_nfe(numero_pedido):
 
   # 1. Abre a tela global de faturamento (Ctrl + F9)
   pyautogui.hotkey("ctrl", "f9")
-  time.sleep(1.5)  # Tempo para a tela global abrir
+  time.sleep(2.0)  # Tempo para a tela global abrir
 
   # 2. Limpeza rápida e otimizada dos 8 deletes
   for _ in range(8):
@@ -26,7 +26,7 @@ def emitir_nfe(numero_pedido):
   # 3. Seleciona o movimento da venda (2.2.03) e confirma
   pyautogui.write("2.2.03", interval=0.08)
   pyautogui.press("enter")
-  time.sleep(0.8)
+  time.sleep(1.0)
 
   # 4. Vai para o campo documento (Alt + D)
   pyautogui.hotkey("alt", "d")
