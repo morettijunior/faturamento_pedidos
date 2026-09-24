@@ -368,6 +368,13 @@ class AppAutomacaoERP:
     txt_box.insert(tk.END, texto_relatorio)
     txt_box.config(state=tk.DISABLED)
 
+    # --- COMANDOS PARA TRAZER O RELATÓRIO PARA O PRIMEIRO PLANO ---
+    top.lift()
+    top.attributes("-topmost", True)
+    top.after_idle(top.attributes, "-topmost", False)
+    top.focus_force()
+    # -------------------------------------------------------------
+
 
 if __name__ == "__main__":
   root = tk.Tk()

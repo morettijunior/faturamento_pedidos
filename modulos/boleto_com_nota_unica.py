@@ -20,6 +20,9 @@ def emitir_boletos_com_nota_unica(numero_pedido):
 
   nfe = dados.get("NFE")
   rps = dados.get("RPS")
+  nfs = dados.get("NFS", rps)
+  os_num = dados.get("OS")
+  num_ped = dados.get("NUMERO_PEDIDO")
 
   if nfe:
     documento_filtro = nfe
@@ -36,11 +39,31 @@ def emitir_boletos_com_nota_unica(numero_pedido):
     print(f"[ERRO] Nenhuma parcela encontrada na FLAN para o documento {documento_filtro}.")
     return
 
-  os_num = dados.get("OS")
+  # Montagem correta do histórico (O.S./PEDIDO + NFE/NFS)
+  prefixo = f"O.S. {os_num}" if os_num else f"PEDIDO {num_ped}"
+  partes = [prefixo]
+  if nfe and tipo_doc == "NFE":
+    partes.append(f"NFE {nfe}")
+  if nfs and tipo_doc != "NFE":
+    partes.append(f"NFS {nfs}")
+  elif nfs and tipo_doc == "NFE" and rps:
+    # Caso tenha ambos mas entrou por nota única
+    pass
+
+  # Se for nota única geral, garante que exibe o documento correto presente
   if os_num:
-    historico = f"O.S. {os_num}".upper()
+    historico = f"O.S. {os_num}"
   else:
-    historico = f"PEDIDO {dados['NUMERO_PEDIDO']}".upper()
+    historico = f"PEDIDO {num_ped}"
+  
+  if nfe and not rps:
+    historico += f" NFE {nfe}"
+  elif rps and not nfe:
+    historico += f" NFS {nfs}"
+  elif nfe and rps:
+    historico += f" NFE {nfe} NFS {nfs}"
+  
+  historico = historico.upper()
 
   print(f"[FINANCEIRO] Documento de filtro ({tipo_doc}): {documento_filtro} | Parcelas: {len(parcelas)}")
 
@@ -117,12 +140,12 @@ def emitir_boletos_com_nota_unica(numero_pedido):
     time.sleep(0.5)
 
     pyautogui.hotkey("alt", "o")
-    time.sleep(1.5)
+    time.sleep(2.5)  # Tempo aumentado (+1s) para processar a operação
 
     pyautogui.press("s")
     time.sleep(1.0)
     pyautogui.press("s")
-    time.sleep(2.5)
+    time.sleep(3.5)  # Tempo extra de consolidação (+1s)
 
     pyautogui.hotkey("alt", "f")
     time.sleep(1.0)

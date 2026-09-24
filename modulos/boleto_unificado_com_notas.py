@@ -33,10 +33,8 @@ def emitir_boleto_unificado_com_notas(numero_pedido):
   documentos = [nfe, rps]
   doc_combinado = f"{nfe}/{nfs}"
 
-  if os_num:
-    historico_unificado = f"O.S. {os_num} NFE {nfe} NFS {nfs}".upper()
-  else:
-    historico_unificado = f"PEDIDO {num_ped} NFE {nfe} NFS {nfs}".upper()
+  prefixo = f"O.S. {os_num}" if os_num else f"PEDIDO {num_ped}"
+  historico_unificado = f"{prefixo} NFE {nfe} NFS {nfs}".upper()
 
   # Foca no TGA Financeiro
   focar_financeiro()
@@ -196,11 +194,11 @@ def emitir_boleto_unificado_com_notas(numero_pedido):
   time.sleep(0.5)
 
   pyautogui.hotkey("alt", "o")
-  time.sleep(1.5)
+  time.sleep(2.5)  # Tempo aumentado (+1s)
   pyautogui.press("s")
   time.sleep(1.0)
   pyautogui.press("s")
-  time.sleep(2.5)
+  time.sleep(3.5)  # Tempo extra de consolidação (+1s)
 
   pyautogui.hotkey("alt", "f")
   time.sleep(1.0)
