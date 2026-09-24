@@ -9,8 +9,8 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(base_dir)
 sys.path.append(os.path.join(base_dir, "modulos"))
 
-# Importações de todos os módulos reais (Geração, Envio, Financeiro e BD com pós-consulta)
-from modulos.bd import consultar_dados_pedido, consultar_numeros_boletos
+# Importações de todos os módulos reais
+from modulos.bd import consultar_dados_pedido, consultar_detalhes_boletos
 from modulos.nfe import emitir_nfe
 from modulos.envio_nfe import enviar_nfe
 from modulos.nfs import emitir_nfs
@@ -189,7 +189,7 @@ class AppAutomacaoERP:
         boletos_gerados = []
 
         # =========================================================================
-        # ETAPA 1: GERAÇÃO E ENVIO DE NOTAS FISCAIS (1º NFE, 2º NFS)
+        # ETAPA 1: GERAÇÃO E ENVIO DE NOTAS FISCAIS
         # =========================================================================
         if item["nfe"]:
           self.log(f"[{pedido}] [1/4] Gerando NFE (nfe.py)...")
@@ -213,10 +213,10 @@ class AppAutomacaoERP:
 
         if item["nfe"] or item["nfs"]:
           self.log(f"[{pedido}] [ETAPA 1 CONCLUÍDA] Notas geradas e transmitidas.")
-          time.sleep(1.5)  # Transição segura para o financeiro
+          time.sleep(1.5)
 
         # =========================================================================
-        # ETAPA 2: EMISSÃO DE BOLETOS (SE MARCADA)
+        # ETAPA 2: EMISSÃO DE BOLETOS
         # =========================================================================
         if item["boleto_cada"] or item["unificado"]:
           self.log(f"[{pedido}] [ETAPA 2] Consultando dados no banco (bd.py) para o financeiro...")
@@ -230,7 +230,6 @@ class AppAutomacaoERP:
           nfe_bd = dados_bd.get("NFE")
           rps_bd = dados_bd.get("RPS")
           nfs_bd = dados_bd.get("NFS")
-          valor_total = dados_bd.get("VALOR_TOTAL", "R$ 0,00")
           vencimentos = dados_bd.get("VENCIMENTOS", [])
 
           tipo_boleto = ""
@@ -261,46 +260,50 @@ class AppAutomacaoERP:
           if rps_bd: num_nfs_gerada = str(rps_bd)
 
           # =====================================================================
-          # PÓS-CONSULTA: BUSCANDO O NÚMERO DO BOLETO (BOL_NUMERO) NA FLAN
+          # PÓS-CONSULTA: BUSCANDO DETALHES DE CADA BOLETO NA FLAN
           # =====================================================================
-          self.log(f"[{pedido}] Consultando número(s) de boleto(s) na FLAN (BOL_NUMERO)...")
-          time.sleep(2.0)  # Pausa segura para consolidação no Firebird
+          self.log(f"[{pedido}] Consultando detalhes dos boletos na FLAN por parcela...")
+          time.sleep(2.0)  # Pausa para consolidação no Firebird
           
-          numeros_boletos = consultar_numeros_boletos(pedido, tipo_rotina=tipo_rotina_bd, nfe=nfe_bd, rps=rps_bd)
-          str_num_boleto = " / ".join(numeros_boletos) if numeros_boletos else "Pendente / Não Capturado"
+          detalhes_boletos = consultar_detalhes_boletos(pedido, tipo_rotina=tipo_rotina_bd, nfe=nfe_bd, rps=rps_bd)
 
-          # Montagem descritiva do documento de origem no relatório
+          # Documento de origem padrão caso fallback
           if item["unificado"]:
             partes_doc = []
             if nfe_bd: partes_doc.append(f"NFE: {nfe_bd}")
             if nfs_bd or rps_bd: partes_doc.append(f"NFS: {nfs_bd or rps_bd}")
-            doc_origem_str = " / ".join(partes_doc) if partes_doc else f"Pedido: {pedido}"
+            doc_origem_fallback = " / ".join(partes_doc) if partes_doc else f"Pedido: {pedido}"
           else:
             if nfe_bd and not (nfs_bd or rps_bd):
-              doc_origem_str = f"NFE: {nfe_bd}"
+              doc_origem_fallback = f"NFE: {nfe_bd}"
             elif (nfs_bd or rps_bd) and not nfe_bd:
-              doc_origem_str = f"NFS: {nfs_bd or rps_bd}"
+              doc_origem_fallback = f"NFS: {nfs_bd or rps_bd}"
             elif nfe_bd and (nfs_bd or rps_bd):
-              doc_origem_str = f"NFE: {nfe_bd} / NFS: {nfs_bd or rps_bd}"
+              doc_origem_fallback = f"NFE: {nfe_bd} / NFS: {nfs_bd or rps_bd}"
             else:
-              doc_origem_str = f"Pedido: {pedido}"
+              doc_origem_fallback = f"Pedido: {pedido}"
 
-          num_doc_relatorio = f"{doc_origem_str} | Boleto Nº: {str_num_boleto}"
+          if detalhes_boletos:
+            for bol in detalhes_boletos:
+              valor_formatado = f"R$ {bol['valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+              doc_origem_item = bol["documento_origem"] if bol["documento_origem"] else doc_origem_fallback
 
-          # Formatação amigável da data de DDMMYYYY para DD/MM/YYYY
-          venc_raw = vencimentos[0] if vencimentos else ""
-          if len(venc_raw) == 8 and venc_raw.isdigit():
-            venc_formatado = f"{venc_raw[0:2]}/{venc_raw[2:4]}/{venc_raw[4:8]}"
+              boletos_gerados.append({
+                  "tipo": tipo_boleto,
+                  "numero": f"Num: {doc_origem_item} | Boleto Nº: {bol['numero_boleto']}",
+                  "vencimento": bol["vencimento"],
+                  "valor": valor_formatado,
+              })
           else:
-            venc_formatado = venc_raw or "A definir"
+            # Fallback caso não retorne na pós-consulta
+            boletos_gerados.append({
+                "tipo": tipo_boleto,
+                "numero": f"Num: {doc_origem_fallback} | Boleto Nº: Não Capturado",
+                "vencimento": vencimentos[0] if vencimentos else "A definir",
+                "valor": dados_bd.get("VALOR_TOTAL", "R$ 0,00"),
+            })
 
-          boletos_gerados.append({
-              "tipo": tipo_boleto,
-              "numero": num_doc_relatorio,
-              "vencimento": venc_formatado,
-              "valor": valor_total,
-          })
-          self.log(f"[{pedido}] [ETAPA 2 CONCLUÍDA] Boleto(s) emitido(s) e mapeados com sucesso.")
+          self.log(f"[{pedido}] [ETAPA 2 CONCLUÍDA] Boletos mapeados com sucesso no relatório.")
 
         # Consolida o sucesso do pedido
         relatorio_sucesso.append({
@@ -348,7 +351,7 @@ class AppAutomacaoERP:
       if item["boletos"]:
         for idx, bol in enumerate(item["boletos"], 1):
           texto_relatorio += (
-              f"    -> [{bol['tipo']}] Boleto {idx:02d} | Num: {bol['numero']}"
+              f"    -> Boleto {idx:02d} | Num: {bol['numero']}"
               f" | Venc: {bol['vencimento']} | Val: {bol['valor']}\n"
           )
       else:

@@ -1,5 +1,6 @@
 import time
 import pyautogui
+import pyperclip
 from bd import consultar_dados_pedido
 from utils import focar_financeiro
 
@@ -35,7 +36,7 @@ def emitir_boleto_unificado_com_notas(numero_pedido):
   if os_num:
     historico_unificado = f"O.S. {os_num} NFE {nfe} NFS {nfs}".upper()
   else:
-    historico_unificado = f"PEDIDO {num_ped} NFE {nfe} NFS {nfs}".upper()   
+    historico_unificado = f"PEDIDO {num_ped} NFE {nfe} NFS {nfs}".upper()
 
   # Foca no TGA Financeiro
   focar_financeiro()
@@ -152,7 +153,11 @@ def emitir_boleto_unificado_com_notas(numero_pedido):
   pyautogui.hotkey("ctrl", "a")
   pyautogui.press("delete")
   time.sleep(0.1)
-  pyautogui.write(historico_unificado, interval=0.08)
+  
+  # Inserção do histórico unificado via Ctrl + V garantindo maiúsculo
+  pyperclip.copy(historico_unificado)
+  time.sleep(0.2)
+  pyautogui.hotkey("ctrl", "v")
   time.sleep(0.5)
 
   pyautogui.hotkey("alt", "t")
@@ -202,4 +207,4 @@ def emitir_boleto_unificado_com_notas(numero_pedido):
   pyautogui.press("down")
   time.sleep(0.2)
 
-  print(f"[FINANCEIRO] Boleto unificado do pedido {numero_pedido} emitido com sucesso!")  
+  print(f"[FINANCEIRO] Boleto unificado do pedido {numero_pedido} emitido com sucesso!")

@@ -1,5 +1,6 @@
 import time
 import pyautogui
+import pyperclip
 from bd import consultar_dados_pedido
 from utils import focar_financeiro
 
@@ -71,7 +72,10 @@ def emitir_boleto_sem_nota(numero_pedido):
     pyautogui.press("delete")
     time.sleep(0.1)
 
-    pyautogui.write(historico, interval=0.08)
+    # Inserção do histórico via Ctrl + V garantindo maiúsculo
+    pyperclip.copy(historico)
+    time.sleep(0.2)
+    pyautogui.hotkey("ctrl", "v")
     time.sleep(0.5)
 
     pyautogui.hotkey("alt", "s")

@@ -189,13 +189,8 @@ def consultar_dados_pedido(numero_input):
     con.close()
 
 
-def consultar_numeros_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
-  """Consulta o BOL_NUMERO na tabela FLAN após a emissão, respeitando as regras específicas:
-  - 'nota_unica': Busca pelo NUMERODOCUMENTO (NFE ou RPS formatados com 7 dígitos).
-  - 'individual': Busca para ambos (NFE e RPS) e consolida.
-  - 'sem_nota': Busca pelo número do pedido formatado com 7 dígitos.
-  - 'unificado': Busca pelo documento combinado (ex: 79008/18867 ou com 7 dígitos nas partes).
-  """
+def consultar_detalhes_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
+  """Consulta detalhada na FLAN retornando para cada parcela o seu BOL_NUMERO, vencimento e valor."""
   con = conectar_banco()
   if not con:
     return []
@@ -203,30 +198,29 @@ def consultar_numeros_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
   cursor = con.cursor()
   num_formatado = formatar_7_digitos(numero_input)
 
-  def buscar_por_doc(doc_str):
+  def buscar_detalhes_por_doc(doc_str):
     if not doc_str:
       return []
     doc_str_clean = str(doc_str).strip()
     
-    # Se for um documento numérico simples (menor ou igual a 7 dígitos), testa com 7 dígitos e limpo.
-    # Se for composto (ex: unificado contendo '/') ou maior que 7, busca direto sem forçar zfill de 7.
     if "/" not in doc_str_clean and len(doc_str_clean) <= 7:
       doc_7 = formatar_7_digitos(doc_str_clean)
+      # Usa estritamente PARCELA (conforme sua estrutura da FLAN)
       q = """
-                SELECT DISTINCT BOL_NUMERO, PARCELAS 
+                SELECT PARCELA, NUMERODOCUMENTO, DATAVENCIMENTO, VALORORIGINAL, BOL_NUMERO 
                 FROM FLAN 
                 WHERE (TRIM(NUMERODOCUMENTO) = ? OR TRIM(NUMERODOCUMENTO) = ?) 
                   AND BOL_NUMERO IS NOT NULL
-                ORDER BY PARCELAS
+                ORDER BY PARCELA
             """
       try:
         cursor.execute(q, (doc_7, doc_str_clean))
         res = cursor.fetchall()
         if res:
-          return [str(row[0]).strip() for row in res if row[0]]
+          return res
       except Exception:
         q_alt = """
-                    SELECT DISTINCT BOL_NUMERO, PARCELA 
+                    SELECT PARCELA, NUMERODOCUMENTO, DATAVENCIMENTO, VALORORIGINAL, BOL_NUMERO 
                     FROM FLAN 
                     WHERE (TRIM(NUMERODOCUMENTO) = ? OR TRIM(NUMERODOCUMENTO) = ?) 
                       AND BOL_NUMERO IS NOT NULL
@@ -235,24 +229,23 @@ def consultar_numeros_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
         cursor.execute(q_alt, (doc_7, doc_str_clean))
         res = cursor.fetchall()
         if res:
-          return [str(row[0]).strip() for row in res if row[0]]
+          return res
     else:
-      # Para documentos compostos (NFE/NFS) ou com mais de 7 dígitos
       q = """
-                SELECT DISTINCT BOL_NUMERO, PARCELAS 
+                SELECT PARCELA, NUMERODOCUMENTO, DATAVENCIMENTO, VALORORIGINAL, BOL_NUMERO 
                 FROM FLAN 
                 WHERE TRIM(NUMERODOCUMENTO) = ? 
                   AND BOL_NUMERO IS NOT NULL
-                ORDER BY PARCELAS
+                ORDER BY PARCELA
             """
       try:
         cursor.execute(q, (doc_str_clean,))
         res = cursor.fetchall()
         if res:
-          return [str(row[0]).strip() for row in res if row[0]]
+          return res
       except Exception:
         q_alt = """
-                    SELECT DISTINCT BOL_NUMERO, PARCELA 
+                    SELECT PARCELA, NUMERODOCUMENTO, DATAVENCIMENTO, VALORORIGINAL, BOL_NUMERO 
                     FROM FLAN 
                     WHERE TRIM(NUMERODOCUMENTO) = ? 
                       AND BOL_NUMERO IS NOT NULL
@@ -261,38 +254,56 @@ def consultar_numeros_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
         cursor.execute(q_alt, (doc_str_clean,))
         res = cursor.fetchall()
         if res:
-          return [str(row[0]).strip() for row in res if row[0]]
+          return res
           
     return []
 
-  boletos_encontrados = []
+  resultados = []
 
   if tipo_rotina == "nota_unica":
     doc_alvo = nfe if nfe else rps
-    boletos_encontrados = buscar_por_doc(doc_alvo)
+    resultados = buscar_detalhes_por_doc(doc_alvo)
 
   elif tipo_rotina == "individual":
     if nfe:
-      boletos_encontrados.extend(buscar_por_doc(nfe))
+      resultados.extend(buscar_detalhes_por_doc(nfe))
     if rps:
-      boletos_encontrados.extend(buscar_por_doc(rps))
+      resultados.extend(buscar_detalhes_por_doc(rps))
 
   elif tipo_rotina == "sem_nota":
-    boletos_encontrados = buscar_por_doc(num_formatado)
+    resultados = buscar_detalhes_por_doc(num_formatado)
 
   elif tipo_rotina == "unificado":
-    # Formato unificado ex: 79008/18867 ou com 7 dígitos em cada lado (0079008/0018867)
     nfe_7 = formatar_7_digitos(nfe) if nfe else ""
     rps_7 = formatar_7_digitos(rps) if rps else ""
     doc_combinado_7 = f"{nfe_7}/{rps_7}" if (nfe_7 and rps_7) else ""
     doc_combinado_limpo = f"{nfe}/{rps}" if (nfe and rps) else ""
 
-    boletos_encontrados = buscar_por_doc(doc_combinado_7)
-    if not boletos_encontrados and doc_combinado_limpo:
-      boletos_encontrados = buscar_por_doc(doc_combinado_limpo)
+    resultados = buscar_detalhes_por_doc(doc_combinado_7)
+    if not resultados and doc_combinado_limpo:
+      resultados = buscar_detalhes_por_doc(doc_combinado_limpo)
 
   con.close()
-  return list(dict.fromkeys(boletos_encontrados))  # Remove duplicados mantendo a ordem
+
+  lista_boletos_formatada = []
+  for row in resultados:
+    parc, num_doc, dt_venc, val_orig, bol_num = row
+    if bol_num:
+      venc_str = str(dt_venc) if dt_venc else ""
+      if len(venc_str) >= 10:
+        venc_formatado = f"{venc_str[8:10]}/{venc_str[5:7]}/{venc_str[0:4]}"
+      else:
+        venc_formatado = venc_str or "A definir"
+
+      lista_boletos_formatada.append({
+          "parcela": parc,
+          "documento_origem": num_doc.strip() if num_doc else "",
+          "numero_boleto": str(bol_num).strip(),
+          "vencimento": venc_formatado,
+          "valor": float(val_orig) if val_orig else 0.0
+      })
+
+  return lista_boletos_formatada
 
 
 if __name__ == "__main__":

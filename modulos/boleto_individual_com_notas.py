@@ -1,5 +1,6 @@
 import time
 import pyautogui
+import pyperclip
 from bd import consultar_dados_pedido
 from utils import focar_financeiro
 
@@ -49,7 +50,7 @@ def emitir_boletos_individuais_com_notas(numero_pedido):
       else:
         historico = f"O.S. {os_num} NFS {dados.get('NFS', num_doc)}".upper()
     else:
-      historico = f"PEDIDO {num_ped} NFE {nfe}".upper() 
+      historico = f"PEDIDO {num_ped} NFE {nfe}".upper()
 
     # Navega até o campo do documento (Tab 2x)
     pyautogui.press("tab")
@@ -80,7 +81,10 @@ def emitir_boletos_individuais_com_notas(numero_pedido):
     pyautogui.press("delete")
     time.sleep(0.1)
 
-    pyautogui.write(historico, interval=0.08)
+    # Inserção do histórico via Ctrl + V garantindo maiúsculo
+    pyperclip.copy(historico)
+    time.sleep(0.2)
+    pyautogui.hotkey("ctrl", "v")
     time.sleep(0.5)
 
     pyautogui.hotkey("alt", "s")
