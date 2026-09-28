@@ -194,33 +194,41 @@ class AppAutomacaoERP:
         if item["nfe"]:
           self.log(f"[{pedido}] [1/4] Gerando NFE (nfe.py)...")
           emitir_nfe(pedido)
-          time.sleep(1.0)
+          time.sleep(0.5)
 
           self.log(f"[{pedido}] [2/4] Enviando NFE para a SEFAZ (envio_nfe.py)...")
           enviar_nfe(pedido)
           num_nfe_gerada = "Enviada"
-          time.sleep(1.0)
+          time.sleep(0.5)
 
         if item["nfs"]:
           self.log(f"[{pedido}] [3/4] Gerando NFS (nfs.py)...")
           emitir_nfs(pedido)
-          time.sleep(1.0)
+          time.sleep(0.5)
 
           self.log(f"[{pedido}] [4/4] Enviando NFS para a Prefeitura (envio_nfs.py)...")
           enviar_nfs(pedido)
           num_nfs_gerada = "Enviada"
-          time.sleep(1.0)
+          time.sleep(0.5)
 
         if item["nfe"] or item["nfs"]:
           self.log(f"[{pedido}] [ETAPA 1 CONCLUÍDA] Notas geradas e transmitidas.")
-          time.sleep(1.5)
+          time.sleep(0.5)
 
         # =========================================================================
         # ETAPA 2: EMISSÃO DE BOLETOS
         # =========================================================================
         if item["boleto_cada"] or item["unificado"]:
           self.log(f"[{pedido}] [ETAPA 2] Consultando dados no banco (bd.py) para o financeiro...")
-          dados_bd = consultar_dados_pedido(pedido)
+          
+          # Tentativas de consulta para garantir que o banco atualizou após a emissão da nota
+          dados_bd = None
+          for tentativa in range(3):
+            dados_bd = consultar_dados_pedido(pedido)
+            if dados_bd and (dados_bd.get("NFE") or dados_bd.get("RPS") or not (item["nfe"] or item["nfs"])):
+              break
+            self.log(f"[{pedido}] Aguardando consolidação das notas no BD (Tentativa {tentativa+1}/3)...")
+            time.sleep(2.0)
 
           if not dados_bd:
             raise Exception(
@@ -361,7 +369,7 @@ class AppAutomacaoERP:
 
     top = tk.Toplevel(self.root)
     top.title(titulo_janela)
-    top.geometry("720x480")
+    top.geometry("720x580")
 
     txt_box = tk.Text(top, wrap=tk.WORD, font=("Courier", 10))
     txt_box.pack(expand=True, fill="both", padx=10, pady=10)

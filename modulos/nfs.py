@@ -10,7 +10,7 @@ pyautogui.PAUSE = 0.25
 def emitir_nfs(numero_pedido):
   """Emite a NFS utilizando o fluxo global via Ctrl + F9 e fecha a tela ao terminar."""
   focar_estoque()
-  time.sleep(1.0)
+  time.sleep(0.5)
 
   print(f"[NFS] Iniciando faturamento global para o pedido: {numero_pedido}")
 
@@ -18,50 +18,53 @@ def emitir_nfs(numero_pedido):
   pyautogui.hotkey("ctrl", "f9")
   time.sleep(1.5)  # Tempo para a tela global abrir
 
-  # 2. Limpeza rápida e otimizada dos 8 deletes
-  for _ in range(8):
+  # 2. Limpeza rápida e otimizada do campo
+# Apaga voltando com o backspace rapidamente
+  for _ in range(6):  # Número seguro de vezes para cobrir o campo
     pyautogui.press("delete")
-  time.sleep(0.1)  # Apenas um respiro curto no final
+    time.sleep(0.05)
 
   # 3. Seleciona o movimento da venda (2.2.03) e confirma
-  pyautogui.write("2.2.03", interval=0.08)
+  pyautogui.write("2.2.03", interval=0.05)
   pyautogui.press("enter")
-  time.sleep(0.8)
+  time.sleep(0.5)
 
   # 4. Vai para o campo documento (Alt + D)
   pyautogui.hotkey("alt", "d")
   time.sleep(0.3)
 
   # 5. Digita o número do pedido e confirma
-  pyautogui.write(str(numero_pedido), interval=0.08)
+  pyautogui.write(str(numero_pedido), interval=0.05)
   pyautogui.press("enter")
-  time.sleep(0.8)
+  time.sleep(0.5)
 
   # 6. Filtra os dados (Alt + R)
   pyautogui.hotkey("alt", "r")
-  time.sleep(1.2)  # Tempo para a consulta SQL retornar o registro
+  time.sleep(1.0)  # Tempo para a consulta SQL retornar o registro
 
   # 7. Aciona o faturamento (Alt + T)
   pyautogui.hotkey("alt", "t")
   time.sleep(1.0)
 
   # 8. Roteiro específico para a NFS (2.2.07)
-  pyautogui.write("2.2.07", interval=0.08)
+  pyautogui.write("2.2.07", interval=0.05)
   pyautogui.hotkey("alt", "p")
-  time.sleep(1.0)
+  time.sleep(0.8)
 
   pyautogui.press("enter")
   time.sleep(1.5)
 
   # 9. Salva o movimento e confirma com 'Sim'
   pyautogui.hotkey("alt", "s")
-  time.sleep(0.8)
+  time.sleep(0.5)
+  pyautogui.press("enter")
+  time.sleep(0.5)
   pyautogui.press("s")
   time.sleep(2.0)
 
   # 10. Fecha a tela de faturamento global (Alt + F)
   pyautogui.hotkey("alt", "f")
-  time.sleep(1.0)
+  time.sleep(0.5)
 
   print(
       f"[NFS] NFS do pedido {numero_pedido} processada, salva e tela fechada com"

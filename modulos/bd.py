@@ -316,3 +316,59 @@ if __name__ == "__main__":
       print(f"  {chave}: {valor}")
   else:
     print("\n[ERRO] Não foi possível recuperar os dados.")
+
+def verificar_nfe_transmitida(numero_input):
+  """Verifica na TMOV se a NFE possui CHAVEACESSO preenchida (transmitida)."""
+  con = conectar_banco()
+  if not con:
+    return False
+  
+  cursor = con.cursor()
+  num_7 = formatar_7_digitos(numero_input)
+  
+  try:
+    q = """
+        SELECT FIRST 1 T.CHAVEACESSO 
+        FROM TMOV T
+        JOIN TMOV R ON T.IDMOVRELAC = R.IDMOV
+        WHERE R.NUMEROMOV = ? AND T.SERIE = '1'
+    """
+    cursor.execute(q, (num_7,))
+    res = cursor.fetchone()
+    if res and res[0] and str(res[0]).strip():
+      return True
+  except Exception as e:
+    print(f"Erro ao consultar status da NFE no BD: {e}")
+  finally:
+    con.close()
+    
+  return False
+
+
+def verificar_nfs_transmitida(numero_input):
+  """Verifica na TNFEMUNICIPAL se a NFS possui STATUS igual a 'E' (Enviada)."""
+  con = conectar_banco()
+  if not con:
+    return False
+    
+  cursor = con.cursor()
+  num_7 = formatar_7_digitos(numero_input)
+  
+  try:
+    q = """
+        SELECT FIRST 1 F.STATUS 
+        FROM TNFEMUNICIPAL F
+        JOIN TMOV T ON F.IDMOV = T.IDMOV
+        JOIN TMOV R ON T.IDMOVRELAC = R.IDMOV
+        WHERE R.NUMEROMOV = ? AND UPPER(T.SERIE) = 'NFS'
+    """
+    cursor.execute(q, (num_7,))
+    res = cursor.fetchone()
+    if res and res[0] and str(res[0]).strip().upper() == 'E':
+      return True
+  except Exception as e:
+    print(f"Erro ao consultar status da NFS no BD: {e}")
+  finally:
+    con.close()
+    
+  return False
