@@ -1,3 +1,4 @@
+from datetime import datetime
 import fdb
 
 # --- CONFIGURAÇÕES DO BANCO FIREBIRD (TGA) ---
@@ -36,13 +37,6 @@ def limpar_zeros(numero):
 
 
 def consultar_dados_pedido(numero_input):
-  """Consulta o banco Firebird do TGA e retorna um dicionário contendo:
-  - OS (se existir)
-  - NFE (se existir)
-  - NFS (número da NFS-e, se existir)
-  - RPS (número do RPS, se existir - usado para filtro financeiro)
-  - PARCELAS (lista detalhada dos lançamentos na FLAN)
-  """
   con = conectar_banco()
   if not con:
     return None
@@ -52,7 +46,6 @@ def consultar_dados_pedido(numero_input):
   num_limpo = limpar_zeros(numero_input)
 
   try:
-    # 1. Busca o movimento principal na TMOV (Séries EV ou OS)
     query_mov = """
             SELECT IDMOV, NUMEROMOV, SERIE, IDMOVRELAC 
             FROM TMOV 
@@ -63,7 +56,7 @@ def consultar_dados_pedido(numero_input):
     mov_principal = cursor.fetchone()
 
     if not mov_principal:
-      print(f"Movimento de venda {num_formatado} (Séries EV/OS) não encontrado na tabela TMOV.")
+      print(f"Movimento de venda {num_formatado} não encontrado na TMOV.")
       return None
 
     id_mov, num_mov, serie, id_mov_relac = mov_principal
@@ -78,7 +71,6 @@ def consultar_dados_pedido(numero_input):
         "PARCELAS": [],
     }
 
-    # Se for O.S., busca o movimento pai/relacionado
     if eh_os:
       query_os = "SELECT NUMEROMOV, SERIE FROM TMOV WHERE IDMOV = ?"
       cursor.execute(query_os, (id_mov_relac,))
@@ -86,7 +78,6 @@ def consultar_dados_pedido(numero_input):
       if os_relacionada and os_relacionada[1].strip().upper() == "OS":
         dados["OS"] = limpar_zeros(os_relacionada[0])
 
-    # 2. Varredura de Notas Filhas (NFE e NFS/RPS)
     query_filhos = """
             SELECT IDMOV, SERIE, NUMEROMOV 
             FROM TMOV 
@@ -108,14 +99,13 @@ def consultar_dados_pedido(numero_input):
 
       elif f_serie_limpa.upper() == "NFS":
         rps_encontrado = f_num.strip()
-        dados["RPS"] = rps_encontrado  # Salva o RPS para o filtro financeiro
+        dados["RPS"] = rps_encontrado
         query_nfse = "SELECT NUMERONFSE FROM TNFEMUNICIPAL WHERE IDMOV = ?"
         cursor.execute(query_nfse, (f_id,))
         nfse_res = cursor.fetchone()
         if nfse_res:
           dados["NFS"] = str(nfse_res[0]).strip()
 
-    # 3. Busca das Parcelas / Boletos na FLAN
     doc_pedido = num_formatado
     nfe_com_zeros = formatar_7_digitos(nfe_encontrada) if nfe_encontrada else ""
     rps_com_zeros = formatar_7_digitos(rps_encontrado) if rps_encontrado else ""
@@ -161,7 +151,6 @@ def consultar_dados_pedido(numero_input):
             "VALOR": float(val_orig) if val_orig else 0.0,
         })
 
-    # Tratamento de consolidação para a GUI e Robô
     dados["QTDE_PARCELAS"] = len(dados["PARCELAS"])
     
     vencimentos_limpos = []
@@ -190,7 +179,6 @@ def consultar_dados_pedido(numero_input):
 
 
 def consultar_detalhes_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
-  """Consulta detalhada na FLAN retornando para cada parcela o seu BOL_NUMERO, vencimento e valor."""
   con = conectar_banco()
   if not con:
     return []
@@ -205,7 +193,6 @@ def consultar_detalhes_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
     
     if "/" not in doc_str_clean and len(doc_str_clean) <= 7:
       doc_7 = formatar_7_digitos(doc_str_clean)
-      # Usa estritamente PARCELA (conforme sua estrutura da FLAN)
       q = """
                 SELECT PARCELA, NUMERODOCUMENTO, DATAVENCIMENTO, VALORORIGINAL, BOL_NUMERO 
                 FROM FLAN 
@@ -306,19 +293,7 @@ def consultar_detalhes_boletos(numero_input, tipo_rotina, nfe=None, rps=None):
   return lista_boletos_formatada
 
 
-if __name__ == "__main__":
-  print("=== TESTE ISOLADO: CONSULTA BD TGA ===")
-  pedido_teste = input("Digite o número do pedido para consultar: ")
-  resultado = consultar_dados_pedido(pedido_teste)
-  if resultado:
-    print("\n[SUCESSO] Dados coletados:")
-    for chave, valor in resultado.items():
-      print(f"  {chave}: {valor}")
-  else:
-    print("\n[ERRO] Não foi possível recuperar os dados.")
-
 def verificar_nfe_transmitida(numero_input):
-  """Verifica na TMOV se a NFE possui CHAVEACESSO preenchida (transmitida)."""
   con = conectar_banco()
   if not con:
     return False
@@ -346,7 +321,6 @@ def verificar_nfe_transmitida(numero_input):
 
 
 def verificar_nfs_transmitida(numero_input):
-  """Verifica na TNFEMUNICIPAL se a NFS possui STATUS igual a 'E' (Enviada)."""
   con = conectar_banco()
   if not con:
     return False
@@ -372,3 +346,121 @@ def verificar_nfs_transmitida(numero_input):
     con.close()
     
   return False
+
+
+def buscar_dados_os_para_lote(os_num):
+  con = conectar_banco()
+  if not con:
+    print("[BD] Erro: Falha na conexão com o banco Firebird.")
+    return None
+  
+  num_formatado = formatar_7_digitos(os_num)
+  num_limpo = str(os_num).strip()
+  
+  data_encontrada = datetime.now().strftime("%d/%m/%Y")
+  valor_encontrado = "0.00"
+  obs_encontrada = ""
+  data_encerramento = None
+  ja_faturada = False
+  pedido_existente = ""
+
+  try:
+    cursor = con.cursor()
+    
+    q = """
+      SELECT FIRST 1 DATAEMISSAO, VALORBRUTO, OBSERVACAO, DATAENCERRAMENTO, IDMOV 
+      FROM TMOV 
+      WHERE (NUMEROMOV = ? OR NUMEROMOV = ?) AND UPPER(TRIM(SERIE)) = 'OS'
+    """
+    cursor.execute(q, (num_formatado, num_limpo))
+    res = cursor.fetchone()
+    
+    if res:
+      if res[0]:
+        data_encontrada = res[0].strftime("%d/%m/%Y") if hasattr(res[0], 'strftime') else str(res[0])[:10]
+      if res[1]:
+        valor_encontrado = str(res[1])
+      if res[2]:
+        obs_val = res[2]
+        if isinstance(obs_val, bytes):
+          obs_encontrada = obs_val.decode('iso-8859-1', errors='ignore')
+        else:
+          obs_encontrada = str(obs_val)
+      if res[3]:
+        data_encerramento = res[3]
+      
+      idmov_os = res[4]
+      
+      # Busca se já virou EV e traz o NUMEROMOV do pedido gerado
+      q_ev = "SELECT FIRST 1 NUMEROMOV FROM TMOV WHERE IDMOVRELAC = ? AND UPPER(TRIM(SERIE)) = 'EV'"
+      cursor.execute(q_ev, (idmov_os,))
+      res_ev = cursor.fetchone()
+      if res_ev:
+        ja_faturada = True
+        pedido_existente = limpar_zeros(res_ev[0]) or str(res_ev[0]).strip()
+
+    else:
+      print(f"[BD] O.S. '{os_num}' não encontrada na TMOV.")
+      return None
+
+    return {
+        "data": data_encontrada,
+        "valor": valor_encontrado,
+        "obs": obs_encontrada,
+        "encerrada": data_encerramento is not None,
+        "ja_faturada": ja_faturada,
+        "pedido_ev": pedido_existente
+    }
+
+  except Exception as ex:
+    print(f"[BD ERRO] Falha ao consultar O.S. {os_num}: {ex}")
+    return None
+  finally:
+    con.close()
+
+
+if __name__ == "__main__":
+  print("=== TESTE ISOLADO: CONSULTA BD TGA ===")
+  pedido_teste = input("Digite o número do pedido para consultar: ")
+  resultado = consultar_dados_pedido(pedido_teste)
+  if resultado:
+    print("\n[SUCESSO] Dados coletados:")
+    for chave, valor in resultado.items():
+      print(f"  {chave}: {valor}")
+  else:
+    print("\n[ERRO] Não foi possível recuperar os dados.")
+
+def verificar_os_ja_faturada(os_num):
+  """Verifica se a O.S. informada já foi convertida em um Pedido (EV).
+  Retorna True se já existir um EV relacionado a esta O.S., caso contrário False.
+  """
+  con = conectar_banco()
+  if not con:
+    return False
+  
+  num_formatado = formatar_7_digitos(os_num)
+  num_limpo = str(os_num).strip()
+  
+  cursor = con.cursor()
+  try:
+    # 1. Busca o IDMOV da O.S. original
+    q_os = "SELECT IDMOV FROM TMOV WHERE (NUMEROMOV = ? OR NUMEROMOV = ?) AND UPPER(TRIM(SERIE)) = 'OS'"
+    cursor.execute(q_os, (num_formatado, num_limpo))
+    res_os = cursor.fetchone()
+    
+    if not res_os:
+      return False  # Se não achar a OS aqui, a validação de existência tratará
+    
+    idmov_os = res_os[0]
+    
+    # 2. Verifica se já existe um movimento filho (EV) vinculado a este IDMOV
+    q_ev = "SELECT FIRST 1 IDMOV FROM TMOV WHERE IDMOVRELAC = ? AND UPPER(TRIM(SERIE)) = 'EV'"
+    cursor.execute(q_ev, (idmov_os,))
+    res_ev = cursor.fetchone()
+    
+    return res_ev is not None
+  except Exception as e:
+    print(f"Erro ao verificar se O.S. já foi faturada: {e}")
+    return False
+  finally:
+    con.close()
